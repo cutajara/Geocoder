@@ -19,8 +19,8 @@ async def lifespan(app: FastAPI):
         )
     else:
         app.state.df, app.state.bm25, app.state.address_lookup = load_gnaf_from_s3(
-            bucket="your-bucket",
-            key="gnaf/gnaf_vic.parquet"
+            bucket="geocoder-gnaf-vic",
+            key="gnaf_vic.parquet"
         )
     print("Ready")
     yield
