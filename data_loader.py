@@ -2,6 +2,8 @@
 import pandas as pd
 from rank_bm25 import BM25Okapi
 from geocoder import sanitize_input_string
+import boto3
+import io
 
 def load_gnaf(data_path: str):
 
@@ -57,7 +59,7 @@ def load_gnaf(data_path: str):
     if dfaddress.shape[0] != org_shape[0]:
         print("Warning: Row count mismatch after merging geocoded data!")
         
-        
+    
     print("Building BM25 index...")
     dfaddress["full_address_clean"] = dfaddress["full_address"].apply(sanitize_input_string)
     #dfaddress["full_address_clean"].str.replace(r'\s+', ' ', regex=True).str.strip()
@@ -67,3 +69,25 @@ def load_gnaf(data_path: str):
     address_lookup = dfaddress.drop_duplicates(subset=['full_address_clean']).set_index("full_address_clean").to_dict(orient="index")
 
     return dfaddress, bm25, address_lookup
+
+
+def save_gnaf(df, output_path: str):
+    df.to_parquet(output_path, index=False)
+    print(f"Saved to {output_path}")
+    
+    
+def load_gnaf_from_s3(bucket: str, key: str):
+    print("Loading GNAF from S3...")
+    s3 = boto3.client("s3")
+    obj = s3.get_object(Bucket=bucket, Key=key)
+    df = pd.read_parquet(io.BytesIO(obj["Body"].read()))
+
+    print("Building BM25 index...")
+    corpus = [addr.split() for addr in df["full_address_clean"]]
+    bm25 = BM25Okapi(corpus)
+
+    print("Building address lookup...")
+    address_lookup = df.set_index("full_address_clean").to_dict(orient="index")
+
+    print("Ready")
+    return df, bm25, address_lookup

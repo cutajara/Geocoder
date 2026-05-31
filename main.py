@@ -1,15 +1,27 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
-from data_loader import load_gnaf
+from data_loader import load_gnaf, load_gnaf_from_s3
 from geocoder import geocode
 from concurrent.futures import ThreadPoolExecutor
+
+
+RUNMODE = "aws"  # Change to "aws" for AWS Lambda
 
 # --- Lifespan --- loads index once on startup
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Loading GNAF index...")
-    app.state.df, app.state.bm25, app.state.address_lookup = load_gnaf("GNAF")
+    
+    if RUNMODE == "local":
+        app.state.df, app.state.bm25, app.state.address_lookup = load_gnaf(
+            data_path="./data"
+        )
+    else:
+        app.state.df, app.state.bm25, app.state.address_lookup = load_gnaf_from_s3(
+            bucket="your-bucket",
+            key="gnaf/gnaf_vic.parquet"
+        )
     print("Ready")
     yield
 
