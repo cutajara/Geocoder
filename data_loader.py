@@ -1,6 +1,7 @@
 
 import pandas as pd
 from rank_bm25 import BM25Okapi
+import pyarrow.parquet as pq
 from geocoder import sanitize_input_string
 import boto3
 import io
@@ -80,11 +81,14 @@ def load_gnaf_from_s3(bucket: str, key: str, sample: int = None):
     print("Loading GNAF from S3...")
     s3 = boto3.client("s3")
     obj = s3.get_object(Bucket=bucket, Key=key)
-    df = pd.read_parquet(io.BytesIO(obj["Body"].read()))
-
+    buffer = io.BytesIO(obj["Body"].read())
+    parquet_file = pq.ParquetFile(buffer)
+    
     if sample:
-        df = df.sample(sample, random_state=42).reset_index(drop=True)
-        print(f"Sampled {sample} rows")
+        # Read only first N rows
+        df = next(parquet_file.iter_batches(batch_size=sample)).to_pandas()
+    else:
+        df = pd.read_parquet(buffer)
     print("Building BM25 index...")
     corpus = [addr.split() for addr in df["full_address_clean"]]
     bm25 = BM25Okapi(corpus)
