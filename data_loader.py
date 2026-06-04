@@ -76,12 +76,15 @@ def save_gnaf(df, output_path: str):
     print(f"Saved to {output_path}")
     
     
-def load_gnaf_from_s3(bucket: str, key: str):
+def load_gnaf_from_s3(bucket: str, key: str, sample: int = None):
     print("Loading GNAF from S3...")
     s3 = boto3.client("s3")
     obj = s3.get_object(Bucket=bucket, Key=key)
     df = pd.read_parquet(io.BytesIO(obj["Body"].read()))
 
+    if sample:
+        df = df.sample(sample, random_state=42).reset_index(drop=True)
+        print(f"Sampled {sample} rows")
     print("Building BM25 index...")
     corpus = [addr.split() for addr in df["full_address_clean"]]
     bm25 = BM25Okapi(corpus)
