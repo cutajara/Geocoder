@@ -8,3 +8,4 @@ fastparquet==2026.5.0
 fastapi==0.136.3
 pyarrow==24.0.0
 uvicorn==0.48.0
+requests
