@@ -1,19 +1,19 @@
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install dependencies first (Docker layer caching — faster rebuilds)
+# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app code
-COPY main.py .
-COPY geocoder.py .
-COPY data_loader.py .
+# Copy all code
+COPY entrypoint.py .
+COPY processor/ processor/
+COPY api/ api/
 
-# Expose port
+# Default mode is serve
+ENV RUN_MODE=serve
+
 EXPOSE 8000
 
-# Run
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "entrypoint.py"]
