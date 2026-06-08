@@ -29,7 +29,18 @@ class GeocoderStack(Stack):
         )
 
         # --- VPC ---
-        vpc = ec2.Vpc(self, "GeocoderVpc", max_azs=2)
+        vpc = ec2.Vpc(
+            self, "GeocoderVpc",
+            max_azs=2,
+            nat_gateways=0,  # no NAT Gateway
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="Public",
+                    subnet_type=ec2.SubnetType.PUBLIC,
+                    cidr_mask=24
+                )
+            ]
+        )
 
         # --- ECS Cluster ---
         cluster = ecs.Cluster(self, "GeocoderCluster", vpc=vpc)
@@ -91,7 +102,7 @@ class GeocoderStack(Stack):
             environment={
                 "RUN_MODE": "serve",
                 "GNAF_BUCKET": bucket.bucket_name,
-                "GNAF_KEY": "gnaf_addresses.parquet",
+                "GNAF_KEY": "gnaf_vic_sample.parquet",
                 "AWS_DEFAULT_REGION": "ap-southeast-2"
             },
             port_mappings=[ecs.PortMapping(container_port=8000)],
@@ -116,14 +127,17 @@ class GeocoderStack(Stack):
             task_definition=api_task,
             desired_count=1,
             security_groups=[api_sg],
-            assign_public_ip=True
+            assign_public_ip=True,  # needed without NAT
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PUBLIC
+            )
         )
 
         # --- Load Balancer ---
         alb = elbv2.ApplicationLoadBalancer(
-            self, "GecoderALB",
+            self, "GeocoderALB",
             vpc=vpc,
-            internet_facing=True
+            internet_facing=False
         )
         listener = alb.add_listener("Listener", port=80)
         listener.add_targets(
@@ -135,12 +149,22 @@ class GeocoderStack(Stack):
 
         # --- API Gateway ---
         http_api = apigw.HttpApi(self, "GeocoderApi")
+        
+        # Create VPC link
+        vpc_link = apigw.VpcLink(
+            self, "VpcLink",
+            vpc=vpc,
+            subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PUBLIC
+            )
+        )
         http_api.add_routes(
             path="/geocode",
             methods=[apigw.HttpMethod.POST],
             integration=integrations.HttpAlbIntegration(
                 "GeocodeIntegration",
-                listener=listener
+                listener=listener,
+                vpc_link=vpc_link
             )
         )
         http_api.add_routes(
@@ -148,7 +172,8 @@ class GeocoderStack(Stack):
             methods=[apigw.HttpMethod.POST],
             integration=integrations.HttpAlbIntegration(
                 "BatchGeocodeIntegration",
-                listener=listener
+                listener=listener,
+                vpc_link=vpc_link
             )
         )
         http_api.add_routes(
@@ -156,7 +181,18 @@ class GeocoderStack(Stack):
             methods=[apigw.HttpMethod.GET],
             integration=integrations.HttpAlbIntegration(
                 "AddressIntegration",
-                listener=listener
+                listener=listener,
+                vpc_link=vpc_link
+            )
+        )
+        
+        http_api.add_routes(
+            path="/health",
+            methods=[apigw.HttpMethod.GET],
+            integration=integrations.HttpAlbIntegration(
+                "HealthIntegration",
+                listener=listener,
+                vpc_link=vpc_link
             )
         )
 

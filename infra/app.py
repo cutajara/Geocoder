@@ -2,7 +2,6 @@
 import os
 
 import aws_cdk as cdk
-from infra.infra_stack import InfraStack
 from geocoder_stack import GeocoderStack
 
 app = cdk.App()

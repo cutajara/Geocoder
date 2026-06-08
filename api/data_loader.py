@@ -5,6 +5,7 @@ import pyarrow.parquet as pq
 import boto3
 from api.geocoder import sanitize_input_string
 import io
+import os
     
 def build_geocoder_inputs(df):
     print("Building BM25 index...")
@@ -27,7 +28,9 @@ def load_gnaf(data_path: str):
     df, bm25, address_lookup = build_geocoder_inputs(df)
     return df, bm25, address_lookup
     
-def load_gnaf_from_s3(bucket: str, key: str, sample: int = None):
+def load_gnaf_from_s3(sample: int = None):
+    bucket = os.environ.get("GNAF_BUCKET")
+    key = os.environ.get("GNAF_KEY", "gnaf_vic_sample.parquet")
     print("Loading GNAF from S3...")
     s3 = boto3.client("s3")
     obj = s3.get_object(Bucket=bucket, Key=key)

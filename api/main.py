@@ -6,11 +6,9 @@ from api.geocoder import geocode
 from concurrent.futures import ThreadPoolExecutor
 
 
-RUNMODE = "local"  # Change to "aws" for AWS Lambda
+RUNMODE = "aws"  # Change to "aws" for AWS Lambda
 
 LOCAL_PATH = "DataPrep/gnaf_addresses.parquet"
-AWS_BUCKET = "geocoder-gnaf-vic"
-AWS_OBJECT_KEY = "gnaf_vic_sample.parquet"
 
 # --- Lifespan --- loads index once on startup
 @asynccontextmanager
@@ -23,8 +21,6 @@ async def lifespan(app: FastAPI):
         )
     else:
         app.state.df, app.state.bm25, app.state.address_lookup = load_gnaf_from_s3(
-            bucket="geocoder-gnaf-vic",
-            key="gnaf_vic_sample.parquet",
             #sample=100000 # REmove for production
         )
     print("Ready")
