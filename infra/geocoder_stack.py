@@ -74,6 +74,7 @@ class GeocoderStack(Stack):
                 "GNAF_URL": gnaf_url,
                 "GNAF_MONTH_RELEASE": gnaf_month_release,
                 "GNAF_BUCKET": bucket.bucket_name,
+                "GNAF_KEY": "gnaf_addresses.parquet"
                 "AWS_DEFAULT_REGION": "ap-southeast-2"
             },
             logging=ecs.LogDrivers.aws_logs(stream_prefix="geocoder-processing")

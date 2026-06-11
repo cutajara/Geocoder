@@ -61,7 +61,7 @@ def transform_gnaf(data_path, statename):
     return dfaddress
 
 
-def download_and_process_gnaf(url, month_release, bucket, key):
+def download_and_process_gnaf(url, month_release, output_path):
     print("Downloading GNAF...")
     r = requests.get(url)
     r.raise_for_status()  # Check if the request was successful
@@ -77,11 +77,11 @@ def download_and_process_gnaf(url, month_release, bucket, key):
     print("Combining states...")
     local_path = "/tmp/gnaf_addresses.parquet"
     pd.concat(dfs, ignore_index=True).to_parquet(local_path, index=False)
-
+    dfs.to_parquet(output_path, index=False)
     # Upload to S3
-    print("Uploading to S3...")
-    boto3.client("s3").upload_file(local_path, bucket, key)
-    print(f"Done — uploaded to s3://{bucket}/{key}")
+    #print("Uploading to S3...")
+    #boto3.client("s3").upload_file(local_path, bucket, key)
+    #print(f"Done — uploaded to s3://{bucket}/{key}")
     
 
 #    output_path = "gnaf_addresses.parquet"
