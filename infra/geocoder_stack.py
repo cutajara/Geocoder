@@ -9,7 +9,6 @@ from aws_cdk import (
     aws_elasticloadbalancingv2 as elbv2,
     CfnOutput,
     RemovalPolicy,
-    Duration,
 )
 from constructs import Construct
 
@@ -29,17 +28,11 @@ class GeocoderStack(Stack):
         )
 
         # --- VPC ---
+        # NAT Gateway allows ECS in private subnets to reach ECR and S3
         vpc = ec2.Vpc(
             self, "GeocoderVpc",
             max_azs=2,
-            nat_gateways=0,  # no NAT Gateway
-            subnet_configuration=[
-                ec2.SubnetConfiguration(
-                    name="Public",
-                    subnet_type=ec2.SubnetType.PUBLIC,
-                    cidr_mask=24
-                )
-            ]
+            nat_gateways=1
         )
 
         # --- ECS Cluster ---
@@ -66,8 +59,8 @@ class GeocoderStack(Stack):
         # --- Processing Task Definition ---
         processing_task = ecs.FargateTaskDefinition(
             self, "ProcessingTask",
-            cpu=2048,       # 2 vCPU
-            memory_limit_mib=8192,  # 8GB for processing full GNAF
+            cpu=2048,
+            memory_limit_mib=8192,
             execution_role=execution_role,
             task_role=task_role
         )
@@ -89,8 +82,8 @@ class GeocoderStack(Stack):
         # --- API Task Definition ---
         api_task = ecs.FargateTaskDefinition(
             self, "ApiTask",
-            cpu=1024,       # 1 vCPU
-            memory_limit_mib=4096,  # 4GB for BM25 index
+            cpu=1024,
+            memory_limit_mib=4096,
             execution_role=execution_role,
             task_role=task_role
         )
@@ -109,35 +102,58 @@ class GeocoderStack(Stack):
             logging=ecs.LogDrivers.aws_logs(stream_prefix="geocoder-api")
         )
 
-        # --- Security Group for API ---
+        # --- Security Groups ---
+        vpc_link_sg = ec2.SecurityGroup(
+            self, "VpcLinkSecurityGroup",
+            vpc=vpc,
+            description="Security group for API Gateway VPC Link"
+        )
+
+        alb_sg = ec2.SecurityGroup(
+            self, "AlbSecurityGroup",
+            vpc=vpc,
+            description="Security group for internal ALB"
+        )
+        alb_sg.add_ingress_rule(
+            vpc_link_sg,
+            ec2.Port.tcp(80),
+            "Allow API Gateway VPC Link to reach ALB listener"
+        )
+
         api_sg = ec2.SecurityGroup(
             self, "ApiSecurityGroup",
             vpc=vpc,
-            description="Geocoder API security group"
+            description="Security group for Geocoder API tasks"
         )
         api_sg.add_ingress_rule(
-            ec2.Peer.any_ipv4(),
-            ec2.Port.tcp(8000)
+            alb_sg,
+            ec2.Port.tcp(8000),
+            "Allow ALB to reach API container"
         )
 
         # --- API ECS Service ---
+        # Private subnets — NAT Gateway handles outbound internet access
         api_service = ecs.FargateService(
             self, "ApiService",
             cluster=cluster,
             task_definition=api_task,
             desired_count=1,
             security_groups=[api_sg],
-            assign_public_ip=True,  # needed without NAT
             vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PUBLIC
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
             )
         )
 
-        # --- Load Balancer ---
+        # --- Internal Load Balancer ---
+        # Internal ALB — only accessible via VPC Link from API Gateway
         alb = elbv2.ApplicationLoadBalancer(
             self, "GeocoderALB",
             vpc=vpc,
-            internet_facing=False
+            internet_facing=False,
+            security_group=alb_sg,
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            )
         )
         listener = alb.add_listener("Listener", port=80)
         listener.add_targets(
@@ -147,17 +163,20 @@ class GeocoderStack(Stack):
             health_check=elbv2.HealthCheck(path="/health")
         )
 
-        # --- API Gateway ---
-        http_api = apigw.HttpApi(self, "GeocoderApi")
-        
-        # Create VPC link
+        # --- VPC Link ---
+        # Private connection from API Gateway to internal ALB
         vpc_link = apigw.VpcLink(
             self, "VpcLink",
             vpc=vpc,
+            security_groups=[vpc_link_sg],
             subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PUBLIC
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
             )
         )
+
+        # --- API Gateway ---
+        http_api = apigw.HttpApi(self, "GeocoderApi")
+
         http_api.add_routes(
             path="/geocode",
             methods=[apigw.HttpMethod.POST],
@@ -185,7 +204,6 @@ class GeocoderStack(Stack):
                 vpc_link=vpc_link
             )
         )
-        
         http_api.add_routes(
             path="/health",
             methods=[apigw.HttpMethod.GET],
