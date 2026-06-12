@@ -2,6 +2,9 @@
 Geocode Australia address from raw text
 
 
+## Docker App
+
+
 ## To run the dev container
 docker run -it \
   -v ${PWD}:/app \
@@ -13,6 +16,9 @@ docker run -it \
   
   
  When inside
- cd infra
- cdk bootstrap aws://your-account-id/ap-southeast-2
- cdk deploy
+ - cd infra
+ - cdk bootstrap aws://your-account-id/ap-southeast-2
+ - cdk deploy
+ 
+ 
+ ## Prepare the GNAF

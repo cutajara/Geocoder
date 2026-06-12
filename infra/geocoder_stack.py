@@ -74,7 +74,7 @@ class GeocoderStack(Stack):
                 "GNAF_URL": gnaf_url,
                 "GNAF_MONTH_RELEASE": gnaf_month_release,
                 "GNAF_BUCKET": bucket.bucket_name,
-                "GNAF_KEY": "gnaf_addresses.parquet"
+                "GNAF_KEY": "gnaf_addresses.parquet",
                 "AWS_DEFAULT_REGION": "ap-southeast-2"
             },
             logging=ecs.LogDrivers.aws_logs(stream_prefix="geocoder-processing")
@@ -83,8 +83,8 @@ class GeocoderStack(Stack):
         # --- API Task Definition ---
         api_task = ecs.FargateTaskDefinition(
             self, "ApiTask",
-            cpu=1024,
-            memory_limit_mib=4096,
+            cpu=4096,
+            memory_limit_mib=16384,
             execution_role=execution_role,
             task_role=task_role
         )
@@ -96,7 +96,7 @@ class GeocoderStack(Stack):
             environment={
                 "RUN_MODE": "serve",
                 "GNAF_BUCKET": bucket.bucket_name,
-                "GNAF_KEY": "gnaf_vic_sample.parquet",
+                "GNAF_KEY": "gnaf_addresses.parquet",
                 "AWS_DEFAULT_REGION": "ap-southeast-2"
             },
             port_mappings=[ecs.PortMapping(container_port=8000)],
