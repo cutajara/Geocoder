@@ -11,8 +11,9 @@ from constructs import Construct
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_lambda as _lambda
-from aws_cdk import aws_lambda_python_alpha as lambda_python
+import aws_lambda_python_alpha as lambda_python
 from aws_cdk import aws_apigateway as apigw
+from aws_cdk import CfnOutput
 
 class GeocoderStack(Stack):
 
@@ -40,8 +41,8 @@ class GeocoderStack(Stack):
                     cidr_mask=24
                 ),
                 ec2.SubnetConfiguration(
-                    name="PrivateIsolated", 
-                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, 
+                    name="PrivateWithEgress", 
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, 
                     cidr_mask=24
                 )
             ]
@@ -76,7 +77,8 @@ class GeocoderStack(Stack):
             ),
             vpc=vpc,
             security_groups=[opensearch_sg],
-            vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED)],
+#            vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED)],
+            vpc_subnets=vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS).subnets,
             
             # Open VPC Access Policy: Controlled entirely via Security Groups for safety
             access_policies=[
@@ -128,7 +130,7 @@ class GeocoderStack(Stack):
             handler="handler",                  # The function inside that file
             runtime=_lambda.Runtime.PYTHON_3_11,
             vpc=vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             security_groups=[opensearch_sg],
             environment={
                 "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
@@ -146,3 +148,6 @@ class GeocoderStack(Stack):
             proxy=True, # Forwards all paths directly to our Lambda handler
             description="Public endpoint for our Australian address geocoder"
         )
+
+        # 12. Output the VPC ID for the GitHub Actions pipeline to read
+        CfnOutput(self, "GnafVpcId", value=vpc.vpc_id)
