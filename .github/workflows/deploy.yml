@@ -1,0 +1,74 @@
+name: Deploy Geocoder Stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      gnaf_url:
+        description: 'URL of the GNAF dataset (e.g. https://data.gov.au/data/dataset/19432f89-dc3a-4ef3-b943-5326ef1dbecc/resource/f8666213-4079-44da-bede-ebda3a4363e0/download/g-naf_may26_allstates_gda2020_psv_1023.zip)'
+        required: true
+        type: string
+      release_month:
+        description: 'GNAF release month (e.g. MAY 2026)'
+        required: true
+        type: string
+      deployment_region:
+        description: 'AWS region to deploy the stack (e.g. ap-southeast-2)'
+        required: false
+        default: 'ap-southeast-2'
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. Checkout your code repo
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 2. Set up Python environment for CDK/Lambda bundling
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-node: '3.11'
+
+    # 3. Install Node.js (needed to run the AWS CDK CLI tool)
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # 4. Configure AWS Credentials safely using GitHub Secrets
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ inputs.deployment_region }}
+
+    # 5. Log in to your private Amazon ECR Registry
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    # 6. Build and Push the heavy Fargate container to ECR
+    - name: Build, Tag, and Push Docker Image to ECR
+      run: |
+        # Create repo if it doesn't exist yet
+        aws ecr create-repository --repository-name gnaf-processor --region ${{ inputs.deployment_region }} || true
+        
+        # Build, tag, and push the container using the runner's native Docker engine
+        docker build -t gnaf-processor:latest .
+        docker tag gnaf-processor:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.deployment_region }}.amazonaws.com/gnaf-processor:latest
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.deployment_region }}.amazonaws.com/gnaf-processor:latest
+
+    # 7. Install CDK dependencies and execute the cloud deployment
+    - name: Install CDK Dependencies & Deploy
+      run: |
+        npm install -g aws-cdk
+        pip install -r requirements.txt
+        
+        # Deploy using cloud-native parameters without touching local computer paths
+        cdk deploy --require-approval never \
+          --parameters GnafUrl="${{ inputs.deployment_region }}" \
+          --parameters GnafMonthRelease="${{ inputs.deployment_region }}"

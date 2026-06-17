@@ -1,220 +1,148 @@
 from aws_cdk import (
     Stack,
-    aws_s3 as s3,
-    aws_ecs as ecs,
-    aws_ec2 as ec2,
-    aws_iam as iam,
-    aws_apigatewayv2 as apigw,
-    aws_apigatewayv2_integrations as integrations,
-    aws_elasticloadbalancingv2 as elbv2,
-    CfnOutput,
+    CfnParameter,
     RemovalPolicy,
+    aws_ec2 as ec2,
+    aws_opensearchservice as opensearch,
+    aws_iam as iam,
+    aws_ecr_assets as ecr_assets  # 1. Added for Docker-less cloud asset bundling
 )
 from constructs import Construct
+from aws_cdk import aws_ecs as ecs
+from aws_cdk import aws_logs as logs
+from aws_cdk import aws_lambda as _lambda
+from aws_cdk import aws_lambda_python_alpha as lambda_python
+from aws_cdk import aws_apigateway as apigw
 
 class GeocoderStack(Stack):
 
-    def __init__(self, scope: Construct, construct_id: str,
-                 gnaf_url: str,
-                 gnaf_month_release: str,
-                 **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # --- S3 Bucket ---
-        bucket = s3.Bucket(
-            self, "GnafBucket",
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True
-        )
+        # 1. Configurable Runtime Parameters (No hardcoded data URLs)
+        gnaf_url = CfnParameter(self, "GnafUrl", type="String", 
+                                description="The direct secure download URL for the GNAF zip archive")
+        gnaf_month = CfnParameter(self, "GnafMonthRelease", type="String",
+                                  description="The release tag month (e.g., May2026)")
+        awsAccount = CfnParameter(self, "AwsAccountId", type="String",
+                                  description="Your AWS Account ID (for ECR image reference)")
+        
+        ecr_region = self.region  # Dynamically reference the deployment region for ECR image sourcing
 
-        # --- VPC ---
-        # NAT Gateway allows ECS in private subnets to reach ECR and S3
+        # 2. Build an Isolated Network Environment
         vpc = ec2.Vpc(
-            self, "GeocoderVpc",
-            max_azs=2,
-            nat_gateways=1
-        )
-
-        # --- ECS Cluster ---
-        cluster = ecs.Cluster(self, "GeocoderCluster", vpc=vpc)
-
-        # --- Task Execution Role ---
-        execution_role = iam.Role(
-            self, "TaskExecutionRole",
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-            managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "service-role/AmazonECSTaskExecutionRolePolicy"
+            self, "GnafVpc",
+            max_azs=1,  # Kept to 1 for cost efficiency on our t3.small sandbox cluster
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="Public", 
+                    subnet_type=ec2.SubnetType.PUBLIC, 
+                    cidr_mask=24
+                ),
+                ec2.SubnetConfiguration(
+                    name="PrivateIsolated", 
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, 
+                    cidr_mask=24
                 )
             ]
         )
 
-        # --- Task Role (app code permissions) ---
-        task_role = iam.Role(
-            self, "TaskRole",
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com")
+        # 3. Security Groups (Firewalls)
+        opensearch_sg = ec2.SecurityGroup(
+            self, "OpenSearchSG",
+            vpc=vpc,
+            description="Control inbound access directly to the OpenSearch cluster",
+            allow_all_outbound=True
         )
-        bucket.grant_read_write(task_role)
 
-        # --- Processing Task Definition ---
-        processing_task = ecs.FargateTaskDefinition(
-            self, "ProcessingTask",
-            cpu=2048,
-            memory_limit_mib=8192,
-            execution_role=execution_role,
-            task_role=task_role
+        # Allow any resource inside the VPC network to talk to OpenSearch on HTTPS Port 443
+        opensearch_sg.add_ingress_rule(
+            peer=ec2.Peer.ipv4(vpc.vpc_cidr_block),
+            connection=ec2.Port.tcp(443),
+            description="Allow private inside-VPC traffic to query addresses"
         )
-        processing_task.add_container(
-            "ProcessingContainer",
-            image=ecs.ContainerImage.from_registry(
-                f"{self.account}.dkr.ecr.ap-southeast-2.amazonaws.com/geocoder:latest"
+
+        # 4. Provision Serverless-ready Amazon OpenSearch Domain
+        opensearch_domain = opensearch.Domain(
+            self, "GnafOpenSearchDomain",
+            version=opensearch.EngineVersion.OPENSEARCH_3_5,
+            capacity=opensearch.CapacityConfig(
+                data_node_instance_type="t3.small.search",
+                data_nodes=1
+            ),
+            ebs=opensearch.EbsOptions(
+                volume_size=15,  # 15 GB allocation tailored for micro pricing
+                volume_type=ec2.EbsDeviceVolumeType.GP3
+            ),
+            vpc=vpc,
+            security_groups=[opensearch_sg],
+            vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED)],
+            
+            # Open VPC Access Policy: Controlled entirely via Security Groups for safety
+            access_policies=[
+                iam.PolicyStatement(
+                    actions=["es:*"],
+                    effect=iam.Effect.ALLOW,
+                    principals=[iam.AnyPrincipal()],
+                    resources=[f"arn:aws:es:{self.region}:{self.account}:domain/*"]
+                )
+            ],
+            removal_policy=RemovalPolicy.DESTROY  # Erases the domain entirely on 'cdk destroy'
+        )
+        # 5. Create an ECS Cluster to host our one-off container execution
+        cluster = ecs.Cluster(self, "GnafEcsCluster", vpc=vpc)
+
+        # 6. Define the Serverless Fargate Task
+        fargate_task = ecs.FargateTaskDefinition(
+            self, "GnafIngestionTask",
+            memory_limit_mib=4096,
+            cpu=2048
+        )
+
+        # 7. Link Your Pre-built Code Registry
+        # By pointing directly to your remote ECR URL, your dev container
+        # never has to execute local docker commands during deployment.
+        container = fargate_task.add_container(
+            "GnafProcessorContainer",
+            image=ecs.ContainerImage.from_registry(f"{awsAccount.value_as_string}.dkr.ecr.{ecr_region}.amazonaws.com/gnaf-processor:latest"), # COME BACK AND ADJUST FOR DIFFERNT REGION@
+            logging=ecs.LogDriver.aws_logs(
+                stream_prefix="gnaf-processor",
+                log_retention=logs.RetentionDays.ONE_WEEK
             ),
             environment={
-                "RUN_MODE": "process",
-                "GNAF_URL": gnaf_url,
-                "GNAF_MONTH_RELEASE": gnaf_month_release,
-                "GNAF_BUCKET": bucket.bucket_name,
-                "GNAF_KEY": "gnaf_addresses.parquet",
-                "AWS_DEFAULT_REGION": "ap-southeast-2"
-            },
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="geocoder-processing")
+                "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
+                "GNAF_URL": gnaf_url.value_as_string,
+                "GNAF_RELEASE": gnaf_month.value_as_string,
+                "MODE": "process"
+            }
         )
 
-        # --- API Task Definition ---
-        api_task = ecs.FargateTaskDefinition(
-            self, "ApiTask",
-            cpu=4096,
-            memory_limit_mib=16384,
-            execution_role=execution_role,
-            task_role=task_role
-        )
-        api_task.add_container(
-            "ApiContainer",
-            image=ecs.ContainerImage.from_registry(
-                f"{self.account}.dkr.ecr.ap-southeast-2.amazonaws.com/geocoder:latest"
-            ),
+        # 8. Grant SigV4 access permissions so the container can write to OpenSearch
+        opensearch_domain.grant_write(fargate_task.task_role)
+    
+        # 9. Create the Serverless Lambda function with Auto-Dependency Bundling
+        geocoder_lambda = lambda_python.PythonFunction(
+            self, "GnafQueryLambda",
+            entry="./api",                      # Points to your directory containing lambda_handler.py
+            index="lambda_handler.py",          # The file name
+            handler="handler",                  # The function inside that file
+            runtime=_lambda.Runtime.PYTHON_3_11,
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+            security_groups=[opensearch_sg],
             environment={
-                "RUN_MODE": "serve",
-                "GNAF_BUCKET": bucket.bucket_name,
-                "GNAF_KEY": "gnaf_addresses.parquet",
-                "AWS_DEFAULT_REGION": "ap-southeast-2"
-            },
-            port_mappings=[ecs.PortMapping(container_port=8000)],
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="geocoder-api")
+                "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
+                "MODE": "serve"
+            }
         )
 
-        # --- Security Groups ---
-        vpc_link_sg = ec2.SecurityGroup(
-            self, "VpcLinkSecurityGroup",
-            vpc=vpc,
-            description="Security group for API Gateway VPC Link"
-        )
+        # 10. Grant the Lambda permission to query (Read) OpenSearch
+        opensearch_domain.grant_read(geocoder_lambda.role)
 
-        alb_sg = ec2.SecurityGroup(
-            self, "AlbSecurityGroup",
-            vpc=vpc,
-            description="Security group for internal ALB"
+        # 11. Wrap it with an API Gateway so you can hit it over the web
+        api = apigw.LambdaRestApi(
+            self, "GnafGeocoderApi",
+            handler=geocoder_lambda,
+            proxy=True, # Forwards all paths directly to our Lambda handler
+            description="Public endpoint for our Australian address geocoder"
         )
-        alb_sg.add_ingress_rule(
-            vpc_link_sg,
-            ec2.Port.tcp(80),
-            "Allow API Gateway VPC Link to reach ALB listener"
-        )
-
-        api_sg = ec2.SecurityGroup(
-            self, "ApiSecurityGroup",
-            vpc=vpc,
-            description="Security group for Geocoder API tasks"
-        )
-        api_sg.add_ingress_rule(
-            alb_sg,
-            ec2.Port.tcp(8000),
-            "Allow ALB to reach API container"
-        )
-
-        # --- API ECS Service ---
-        # Private subnets — NAT Gateway handles outbound internet access
-        api_service = ecs.FargateService(
-            self, "ApiService",
-            cluster=cluster,
-            task_definition=api_task,
-            desired_count=1,
-            security_groups=[api_sg],
-            vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            )
-        )
-
-        # --- Internal Load Balancer ---
-        # Internal ALB — only accessible via VPC Link from API Gateway
-        alb = elbv2.ApplicationLoadBalancer(
-            self, "GeocoderALB",
-            vpc=vpc,
-            internet_facing=False,
-            security_group=alb_sg,
-            vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            )
-        )
-        listener = alb.add_listener("Listener", port=80)
-        listener.add_targets(
-            "ApiTarget",
-            port=8000,
-            targets=[api_service],
-            health_check=elbv2.HealthCheck(path="/health")
-        )
-
-        # --- VPC Link ---
-        # Private connection from API Gateway to internal ALB
-        vpc_link = apigw.VpcLink(
-            self, "VpcLink",
-            vpc=vpc,
-            security_groups=[vpc_link_sg],
-            subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            )
-        )
-
-        # --- API Gateway ---
-        http_api = apigw.HttpApi(self, "GeocoderApi")
-
-        http_api.add_routes(
-            path="/geocode",
-            methods=[apigw.HttpMethod.POST],
-            integration=integrations.HttpAlbIntegration(
-                "GeocodeIntegration",
-                listener=listener,
-                vpc_link=vpc_link
-            )
-        )
-        http_api.add_routes(
-            path="/geocode/batch",
-            methods=[apigw.HttpMethod.POST],
-            integration=integrations.HttpAlbIntegration(
-                "BatchGeocodeIntegration",
-                listener=listener,
-                vpc_link=vpc_link
-            )
-        )
-        http_api.add_routes(
-            path="/address",
-            methods=[apigw.HttpMethod.GET],
-            integration=integrations.HttpAlbIntegration(
-                "AddressIntegration",
-                listener=listener,
-                vpc_link=vpc_link
-            )
-        )
-        http_api.add_routes(
-            path="/health",
-            methods=[apigw.HttpMethod.GET],
-            integration=integrations.HttpAlbIntegration(
-                "HealthIntegration",
-                listener=listener,
-                vpc_link=vpc_link
-            )
-        )
-
-        # --- Outputs ---
-        CfnOutput(self, "ApiUrl", value=http_api.url)
-        CfnOutput(self, "BucketName", value=bucket.bucket_name)

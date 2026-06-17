@@ -14,6 +14,5 @@ COPY api/ api/
 # Default mode is serve
 ENV RUN_MODE=serve
 
-EXPOSE 8000
 
 CMD ["python", "entrypoint.py"]

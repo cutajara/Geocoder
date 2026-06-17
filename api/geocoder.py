@@ -1,7 +1,60 @@
 
 import re
-import json
-from rapidfuzz import process, fuzz
+import os
+import boto3
+from opensearchpy import OpenSearch, RequestsHttpConnection
+from requests_aws4auth import AWS4Auth
+
+# These environment variables will be injected automatically by AWS CDK
+OPENSEARCH_ENDPOINT = os.environ['OPENSEARCH_ENDPOINT']
+AWS_REGION = os.environ.get('AWS_REGION', 'ap-southeast-2')
+
+def get_opensearch_client():
+    credentials = boto3.Session().get_credentials()
+    awsauth = AWS4Auth(
+        credentials.access_key, credentials.secret_key, 
+        AWS_REGION, 'es', session_token=credentials.token
+    )
+    return OpenSearch(
+        hosts=[{"host": OPENSEARCH_ENDPOINT, "port": 443}],
+        http_auth=awsauth,
+        use_ssl=True,
+        verify_certs=True,
+        connection_class=RequestsHttpConnection
+    )
+
+def geocode_address(search_string):
+    client = get_opensearch_client()
+    
+    search_string_sanitised = sanitize_input_string(search_string)
+    
+    query = {
+        "query": {
+            "match": {
+                "full_address": {
+                    "query": search_string_sanitised,
+                    "fuzziness": "AUTO",
+                    "operator": "or"
+                }
+            }
+        },
+        "size": 3
+    }
+    
+    response = client.search(index="gnaf", body=query)
+    hits = response['hits']['hits']
+    
+    results = []
+    for hit in hits:
+        results.append({
+            "address": hit['_source']['full_address'],
+            "latitude": hit['_source']['latitude'],
+            "longitude": hit['_source']['longitude'],
+            "score": hit['_score']
+        })
+    return results
+
+
 
 def sanitize_input_string(input_string: str) -> str:
 
@@ -34,50 +87,5 @@ def sanitize_input_string(input_string: str) -> str:
   #print(f"Sanitized input string: {santized_input_string}")
   return santized_input_string
 
-def search_addresses(query_string, bm25, n=10):
-    tokens = query_string.upper().split()
-    scores = bm25.get_scores(tokens)
-    top_n_idx = scores.argsort()[::-1][:n]
-    
-    return top_n_idx
-  
-def create_output(match, score, input_string, dfaddress):
-    match_idx = dfaddress[dfaddress['full_address'] == match].index[0]
-    matched_address = dfaddress.loc[match_idx]
-    matched_address = json.loads(matched_address.to_json())
-    matched_address['score'] = score
-    matched_address['InputAddress'] = input_string
-    return matched_address
-  
-  
-def geocode(input_string, df, bm25, n=10):
-    try:
-        santized_input_string = sanitize_input_string(input_string)
-        search_results = search_addresses(santized_input_string, bm25, n=n)   
-        match, score, _ = process.extractOne(santized_input_string, df.loc[search_results,'full_address'], scorer=fuzz.token_sort_ratio)
 
-
-        match_idx = df[df["full_address"] == match].index[0]
-        row = df.loc[match_idx]
-
-        return {
-            "gnaf_pid":       row["ADDRESS_DETAIL_PID"],
-            "matched_address": match,
-            "input_address":  input_string,
-            "latitude":       row["LATITUDE"],
-            "longitude":      row["LONGITUDE"],
-            "confidence":     round(score / 100, 4)
-        }
-    except Exception as e:
-        print(f"Error geocoding address: {e}")
-        return {
-            "gnaf_pid": None,
-            "matched_address": None,
-            "input_address": input_string,
-            "latitude": None,
-            "longitude": None,
-            "confidence": 0.0
-        }
-        
-        
 

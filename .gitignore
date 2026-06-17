@@ -9,6 +9,11 @@ __pycache__/
 *.parquet
 *.psv
 
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+
+
 # Distribution / packaging
 .Python
 build/

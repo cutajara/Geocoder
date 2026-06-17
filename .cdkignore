@@ -1,0 +1,16 @@
+# Ignore git files
+.git/
+.gitignore
+
+# Ignore local CDK build outputs
+cdk.out/
+.cdk/
+
+# Ignore Python caches and temporary files
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+tmp/
+*.parquet
+
+*.psv
