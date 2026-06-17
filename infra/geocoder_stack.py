@@ -77,8 +77,8 @@ class GeocoderStack(Stack):
             ),
             vpc=vpc,
             security_groups=[opensearch_sg],
-#            vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED)],
-            vpc_subnets=vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS).subnets,
+            vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)],
+#            vpc_subnets=vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS).subnets,
             
             # Open VPC Access Policy: Controlled entirely via Security Groups for safety
             access_policies=[
