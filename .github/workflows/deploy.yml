@@ -30,7 +30,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-node: '3.11'
+        python-version: '3.11'
 
     # 3. Install Node.js (needed to run the AWS CDK CLI tool)
     - name: Set up Node.js
@@ -72,7 +72,7 @@ jobs:
         cdk deploy --require-approval never \
           --parameters GnafUrl="${{ inputs.gnaf_url }}" \
           --parameters GnafMonthRelease="${{ inputs.release_month }}" \
-          --parameters  AwsAccountId="${{ secrets.AWS_ACCOUNT_ID }}"
+          --parameters AwsAccountId="${{ secrets.AWS_ACCOUNT_ID }}"
 
     - name: Trigger G-NAF Ingestion Task
       run: |
