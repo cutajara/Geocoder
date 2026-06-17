@@ -100,6 +100,10 @@ class GeocoderStack(Stack):
             memory_limit_mib=4096,
             cpu=2048
         )
+        # Grants the ECS Agent permission to read from private ECR registry
+        fargate_task.execution_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")
+        )
 
         # 7. Link Your Pre-built Code Registry
         # By pointing directly to your remote ECR URL, your dev container
