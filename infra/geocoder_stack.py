@@ -11,7 +11,7 @@ from constructs import Construct
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_lambda as _lambda
-import aws_lambda_python_alpha as lambda_python
+from aws_cdk import aws_lambda_python_alpha as lambda_python
 from aws_cdk import aws_apigateway as apigw
 from aws_cdk import CfnOutput
 
