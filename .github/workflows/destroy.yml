@@ -1,0 +1,46 @@
+name: Destroy Geocoder Stack
+
+# 1. This ensures it can ONLY be triggered manually by YOU via the GitHub Actions tab
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_region:
+        description: 'AWS region the stack  is deployed in (e.g. ap-southeast-2)'
+        required: false
+        default: 'ap-southeast-2'
+        type: string
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # 2. Authenticate to your account using your repository secrets
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ inputs.deployment_region }}
+
+    # 3. Clean up the dependencies and wipe the cloud resources cleanly
+    - name: Install CDK Dependencies & Destroy Stack
+      run: |
+        npm install -g aws-cdk
+        pip install -r requirements.txt
+        
+        # This flags CDK to tear down all infrastructure resources without asking for confirmation prompt
+        cdk destroy --force
