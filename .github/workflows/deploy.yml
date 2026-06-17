@@ -74,16 +74,23 @@ jobs:
           --parameters GnafMonthRelease="${{ inputs.release_month }}" \
           --parameters AwsAccountId="${{ secrets.AWS_ACCOUNT_ID }}"
 
+    # 8. Fire off the ingestion task automatically using the explicit Stack Outputs
     - name: Trigger G-NAF Ingestion Task
       run: |
-        # 1. Dynamically retrieve the private subnet ID from your new VPC
+        # 1. Fetch the exact CloudFormation Output parameters from your deployed stack
+        CF_OUTPUTS=$(aws cloudformation describe-stacks --stack-name GeocoderStack --query 'Stacks[0].Outputs')
+        
+        VPC_ID=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafVpcId") | .OutputValue')
+        TASK_ARN=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafTaskArn") | .OutputValue')
+
+        # 2. Dynamically retrieve the private subnet ID from your new VPC
         SUBNET_ID=$(aws ec2 describe-subnets \
-          --filters "Name=vpc-id,Values=$(aws cloudformation describe-stacks --stack-name GeocoderStack --query 'Stacks[0].Outputs[?OutputKey==`GnafVpcId`].OutputValue' --output text)" "Name=tag:Name,Values=*PrivateWithEgress*" \
+          --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=*PrivateWithEgress*" \
           --query "Subnets[0].SubnetId" --output text)
           
-        # 2. Trigger the one-off container execution inside your secure backend subnet
+        # 3. Trigger the execution using the absolute, unique Task Definition ARN
         aws ecs run-task \
           --cluster GnafEcsCluster \
-          --task-definition GnafIngestionTask \
+          --task-definition "$TASK_ARN" \
           --launch-type FARGATE \
           --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID],assignPublicIp=DISABLED}"
