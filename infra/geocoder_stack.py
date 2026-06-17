@@ -98,7 +98,8 @@ class GeocoderStack(Stack):
         fargate_task = ecs.FargateTaskDefinition(
             self, "GnafIngestionTask",
             memory_limit_mib=4096,
-            cpu=2048
+            cpu=2048,
+            execution_role=True
         )
         # Grants the ECS Agent permission to read from private ECR registry
         fargate_task.execution_role.add_managed_policy(
