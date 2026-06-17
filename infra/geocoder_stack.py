@@ -151,3 +151,4 @@ class GeocoderStack(Stack):
 
         # 12. Output the VPC ID for the GitHub Actions pipeline to read
         CfnOutput(self, "GnafVpcId", value=vpc.vpc_id)
+        CfnOutput(self, "GnafTaskArn", value=fargate_task.task_definition_arn)
