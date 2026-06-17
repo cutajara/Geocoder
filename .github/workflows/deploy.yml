@@ -70,6 +70,6 @@ jobs:
         
         # Deploy using cloud-native parameters without touching local computer paths
         cdk deploy --require-approval never \
-          --parameters GnafUrl="${{ inputs.deployment_region }}" \
-          --parameters GnafMonthRelease="${{ inputs.deployment_region }}" \
+          --parameters GnafUrl="${{ inputs.gnaf_url }}" \
+          --parameters GnafMonthRelease="${{ inputs.release_month }}" \
           --parameters  AwsAccountId="${{ secrets.AWS_ACCOUNT_ID }}"
