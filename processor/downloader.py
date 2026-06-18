@@ -188,8 +188,8 @@ def run_pipeline():
     data_path = f"./tmp/extracted/G-NAF/G-NAF {GNAF_RELEASE}/Standard"
     
     # Step 4: Stream each state sequentially
-    #STATES = ["NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT", "OT"]
-    STATES = ["OT"]
+    STATES = ["NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT", "OT"]
+    #STATES = ["OT"]
     for state in STATES:
         process_and_bulk_index_state(client, data_path, state)
 
