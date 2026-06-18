@@ -150,7 +150,12 @@ class GeocoderStack(Stack):
             self, "GnafGeocoderApi",
             handler=geocoder_lambda,
             proxy=True, # Forwards all paths directly to our Lambda handler
-            description="Public endpoint for our Australian address geocoder"
+            description="Public endpoint for our Australian address geocoder",
+            deploy_options=apigw.StageOptions(
+                stage_name="prod",
+                throttling_rate_limit=10,  # Steady-state: Max 10 requests per second
+                throttling_burst_limit=20   # Spikes: Allows brief bursts up to 20 requests
+            )
         )
 
         # 12. Output the VPC ID, GNAF Task and Cluster in ECS for the GitHub Actions pipeline to read
