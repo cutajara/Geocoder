@@ -153,6 +153,7 @@ class GeocoderStack(Stack):
             description="Public endpoint for our Australian address geocoder"
         )
 
-        # 12. Output the VPC ID for the GitHub Actions pipeline to read
+        # 12. Output the VPC ID, GNAF Task and Cluster in ECS for the GitHub Actions pipeline to read
         CfnOutput(self, "GnafVpcId", value=vpc.vpc_id)
         CfnOutput(self, "GnafTaskArn", value=fargate_task.task_definition_arn)
+        CfnOutput(self, "GnafClusterName", value=cluster.cluster_name)
