@@ -119,7 +119,7 @@ class GeocoderStack(Stack):
                 "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
                 "GNAF_URL": gnaf_url.value_as_string,
                 "GNAF_RELEASE": gnaf_month.value_as_string,
-                "MODE": "process"
+                "RUN_MODE": "process"
             }
         )
 
@@ -138,7 +138,7 @@ class GeocoderStack(Stack):
             security_groups=[opensearch_sg],
             environment={
                 "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
-                "MODE": "serve"
+                "RUN_MODE": "serve"
             }
         )
 
