@@ -147,6 +147,9 @@ def run_pipeline():
     # Step 1: Create GNAF Index Schema structure if it doesn't exist
     index_config = {
         "settings": {
+            "index": {
+                "number_of_replicas": 0 
+            },
             "analysis": {
                 "analyzer": {
                     "address_analyzer": {
