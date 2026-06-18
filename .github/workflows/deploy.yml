@@ -79,7 +79,8 @@ jobs:
       run: |
         # 1. Fetch the exact CloudFormation Output parameters from your deployed stack
         CF_OUTPUTS=$(aws cloudformation describe-stacks --stack-name GeocoderStack --query 'Stacks[0].Outputs')
-        
+
+        CLUSTER_NAME=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafClusterName") | .OutputValue')
         VPC_ID=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafVpcId") | .OutputValue')
         TASK_ARN=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafTaskArn") | .OutputValue')
 
@@ -90,7 +91,7 @@ jobs:
           
         # 3. Trigger the execution using the absolute, unique Task Definition ARN
         aws ecs run-task \
-          --cluster GnafEcsCluster \
+          --cluster "$CLUSTER_NAME" \
           --task-definition "$TASK_ARN" \
           --launch-type FARGATE \
           --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID],assignPublicIp=DISABLED}"
