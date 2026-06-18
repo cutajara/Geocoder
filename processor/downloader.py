@@ -67,13 +67,13 @@ def process_and_bulk_index_state(client, data_path, statename):
         'NUMBER_LAST_PREFIX', 'NUMBER_LAST', 'NUMBER_LAST_SUFFIX','POSTCODE','STREET_LOCALITY_PID'
     ]
     
-    chunk_size = 50000
+    chunk_size = 10000
     actions = []
     
     # Passing chunksize makes pd.read_csv stream rows sequentially instead of flooding RAM
     for detail_chunk in pd.read_csv(detail_file, sep="|", dtype='str', usecols=detail_cols, chunksize=chunk_size):
         
-        # Merge this minor 50k slice with your lookups
+        # Merge this minor 10k slice with your lookups
         dfaddress = detail_chunk.merge(meta_lookup, on="STREET_LOCALITY_PID", how='left')
         df_final = dfaddress.merge(geocodedf, on='ADDRESS_DETAIL_PID', how='left')
 
