@@ -3,6 +3,8 @@ Geocode Australia address from raw text
 
 Users can deploy this to there AWS Account with their Account ID and URL to latest GNAF dataset.
 
+```mermaid
+
 graph TD
     %% Define Styles
     classDef github fill:#24292e,stroke:#fff,stroke-width:1px,color:#fff;
@@ -11,7 +13,7 @@ graph TD
     classDef external fill:#5A6B7C,stroke:#232F3E,stroke-width:1px,color:#fff;
 
     %% External & CI/CD
-    subgraph GitHub_Platform ["GitHub Platform"]
+    subgraph GitHub_Platform ["GitHub"]
         GA[GitHub Actions Workflow]:::github
         ECR[(Amazon ECR<br>Private Registry)]:::github
     end
@@ -20,18 +22,18 @@ graph TD
     DataGov[(Data.gov.au<br>G-NAF Zip Source)]:::external
 
     %% AWS Cloud Infrastructure
-    subgraph AWS_Cloud ["AWS Cloud (ap-southeast-2)"]
+    subgraph AWS_Cloud ["AWS Cloud (selected region)"]
         
         %% Public Layer
         subgraph Public_Subnet ["VPC Public Subnet (Max AZs: 1)"]
-            APIGW[Amazon API Gateway<br>Throttling: 10 rps / 20 burst]:::awsPublic
+            APIGW[Amazon API Gateway<br>⚡ Throttling: 10 rps / 20 burst]:::awsPublic
             NAT[NAT Gateway]:::awsPublic
         end
 
         %% Private Layer
         subgraph Private_Subnet ["VPC Private Subnet (With Egress)"]
-            Fargate[ECS Fargate Ingestion Task<br>Chunked Pandas Stream Engine]:::awsPrivate
-            Lambda[AWS Lambda Function<br>API Query Handler]:::awsPrivate
+            Fargate[ECS Fargate Ingestion Task<br>📦 Chunked Pandas Stream Engine]:::awsPrivate
+            Lambda[AWS Lambda Function<br>🔍 API Query Handler]:::awsPrivate
             OpenSearch[(Amazon OpenSearch Service<br>t3.small.search / 0 Replicas)]:::awsPrivate
         end
 
@@ -55,7 +57,8 @@ graph TD
     OpenSearch -->|4. Coordinates Data Response| Lambda
     Lambda -->|5. Returns 200 OK JSON JSON| APIGW
     APIGW -->|6. Geocoded Result| User
-
+```
+    
 ## Pipeline
 - To download the large GNAF dataset, run a Fargate container. Stream to download to manage RAM
 - Process one state at a time and upload to OpenSearch
