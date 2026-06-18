@@ -48,4 +48,8 @@ docker run -it -v ${PWD}:/app -e AWS_ACCESS_KEY_ID=your-key -e AWS_SECRET_ACCESS
  - cdk bootstrap --app echo []
  - cdk deploy --parameters GnafUrl="https://data.gov.au/data/dataset/19432f89-dc3a-4ef3-b943-5326ef1dbecc/resource/f8666213-4079-44da-bede-ebda3a4363e0/download/g-naf_may26_allstates_gda2020_psv_1023.zip" --parameters GnafMonthRelease="MAY 2026" --parameters AwsAccountId="<YOUR_ACCOUNT_ID>"
  
- 
+
+
+ # Once deployed:
+ To curl the API:
+ curl -X GET "https://xxxxxxxxxx.execute-api.ap-southeast-2.amazonaws.com/prod/geocode_address?address=100+GeorgeSt+Sydney"
