@@ -40,105 +40,101 @@ def stream_download_zip(url, target_zip_path):
     print("Download complete!")
 
 def process_and_bulk_index_state(client, data_path, statename):
-    """Transforms a single state and streams batches directly into OpenSearch"""
+    """Transforms state rows in streaming chunks to keep memory usage flat"""
     print(f"Processing and indexing {statename}...")
     
-    # Check if the mandatory state file exists before processing
     detail_file = f"{data_path}/{statename}_ADDRESS_DETAIL_psv.psv"
     if not os.path.exists(detail_file):
         print(f"Skipping {statename} (file not found).")
         return
 
-    # Load and merge dataframes exactly like your original clean code
-    detail = pd.read_csv(detail_file, sep="|", dtype='str', usecols=[
-        'ADDRESS_DETAIL_PID','BUILDING_NAME','LOT_NUMBER','LOT_NUMBER_SUFFIX', 
-        'FLAT_TYPE_CODE', 'FLAT_NUMBER_PREFIX', 'FLAT_NUMBER', 'FLAT_NUMBER_SUFFIX', 
-        'LEVEL_TYPE_CODE', 'LEVEL_NUMBER_PREFIX', 'LEVEL_NUMBER', 'LEVEL_NUMBER_SUFFIX',
-        'NUMBER_FIRST_PREFIX', 'NUMBER_FIRST', 'NUMBER_FIRST_SUFFIX',
-        'NUMBER_LAST_PREFIX', 'NUMBER_LAST', 'NUMBER_LAST_SUFFIX','POSTCODE','STREET_LOCALITY_PID'
-    ])
-    
+    # 1. Load small lookup tables fully into memory (Safe, they are small)
     street = pd.read_csv(f"{data_path}/{statename}_STREET_LOCALITY_psv.psv", sep="|", dtype='str', usecols=['STREET_LOCALITY_PID','STREET_NAME','STREET_TYPE_CODE','LOCALITY_PID'])
     locality = pd.read_csv(f"{data_path}/{statename}_LOCALITY_psv.psv", sep="|", dtype='str', usecols=['LOCALITY_PID','LOCALITY_NAME','STATE_PID'])
     state = pd.read_csv(f"{data_path}/{statename}_STATE_psv.psv", sep="|", dtype='str', usecols=['STATE_PID','STATE_ABBREVIATION'])
     geocodedf = pd.read_csv(f"{data_path}/{statename}_ADDRESS_DEFAULT_GEOCODE_psv.psv", sep="|", dtype='str', usecols=['ADDRESS_DETAIL_PID','LONGITUDE','LATITUDE'])
 
-    dfaddress = detail.merge(
-        street.merge(
-            locality.merge(state, on="STATE_PID", how='left'), 
-            on="LOCALITY_PID", how='left'), 
-        on="STREET_LOCALITY_PID", how='left'
-    )
+    # 2. Pre-merge the static lookup metadata to minimize merge footprint inside the loop
+    meta_lookup = street.merge(locality.merge(state, on="STATE_PID", how='left'), on="LOCALITY_PID", how='left')
+    del street, locality, state # Free lookup memory instantly
 
-    # Reassemble full address string matching your clean mapping logic
-    dfaddress["full_address"] = (
-        dfaddress["BUILDING_NAME"].fillna("").astype(str) + " " +
-        dfaddress["LOT_NUMBER"].fillna("").astype(str) + " " +
-        dfaddress["LOT_NUMBER_SUFFIX"].fillna("").astype(str) + " " +
-        dfaddress["FLAT_TYPE_CODE"].fillna("").astype(str) + " " +
-        dfaddress["FLAT_NUMBER_PREFIX"].fillna("").astype(str) + " " +
-        dfaddress["FLAT_NUMBER"].fillna("").astype(str) + " " +
-        dfaddress["FLAT_NUMBER_SUFFIX"].fillna("").astype(str) + " " +
-        dfaddress["LEVEL_TYPE_CODE"].fillna("").astype(str) + " " +
-        dfaddress["LEVEL_NUMBER_PREFIX"].fillna("").astype(str) + " " +
-        dfaddress["LEVEL_NUMBER"].fillna("").astype(str) + " " +
-        dfaddress["LEVEL_NUMBER_SUFFIX"].fillna("").astype(str) + " " +
-        dfaddress["NUMBER_FIRST_PREFIX"].fillna("").astype(str) + " " +
-        dfaddress["NUMBER_FIRST"].fillna("").astype(str) + " " +
-        dfaddress["NUMBER_FIRST_SUFFIX"].fillna("").astype(str) + " " +
-        dfaddress["NUMBER_LAST_PREFIX"].fillna("").astype(str) + " " +
-        dfaddress["NUMBER_LAST"].fillna("").astype(str) + " " +
-        dfaddress["NUMBER_LAST_SUFFIX"].fillna("").astype(str) + " " +
-        dfaddress["STREET_NAME"].fillna("").astype(str) + " " +
-        dfaddress["STREET_TYPE_CODE"].fillna("").astype(str) + " " +
-        dfaddress["LOCALITY_NAME"].fillna("").astype(str) + " " +
-        dfaddress["STATE_ABBREVIATION"].fillna("").astype(str) + " " +
-        dfaddress["POSTCODE"].fillna("").astype(str)
-    )
-    dfaddress["full_address"] = dfaddress["full_address"].str.replace(r'\s+', ' ', regex=True).str.strip()
+    # 3. Stream the massive address detail file in small chunks of 50,000 rows
+    detail_cols = [
+        'ADDRESS_DETAIL_PID','BUILDING_NAME','LOT_NUMBER','LOT_NUMBER_SUFFIX', 
+        'FLAT_TYPE_CODE', 'FLAT_NUMBER_PREFIX', 'FLAT_NUMBER', 'FLAT_NUMBER_SUFFIX', 
+        'LEVEL_TYPE_CODE', 'LEVEL_NUMBER_PREFIX', 'LEVEL_NUMBER', 'LEVEL_NUMBER_SUFFIX',
+        'NUMBER_FIRST_PREFIX', 'NUMBER_FIRST', 'NUMBER_FIRST_SUFFIX',
+        'NUMBER_LAST_PREFIX', 'NUMBER_LAST', 'NUMBER_LAST_SUFFIX','POSTCODE','STREET_LOCALITY_PID'
+    ]
     
-    # Final merge with coordinates
-    df_final = dfaddress[['ADDRESS_DETAIL_PID', 'full_address']].merge(geocodedf, on='ADDRESS_DETAIL_PID', how='left')
-    
-    # Clear out the large dataframes right away to conserve memory before indexing
-    del detail, street, locality, state, geocodedf, dfaddress
-
-    # Chunk the final state data into batches of 5000 records to pipe to OpenSearch
-    batch_size = 5000
+    chunk_size = 50000
     actions = []
     
-    for idx, row in df_final.iterrows():
-        # Handle nan coordinates gracefully so database properties don't reject them
-        try:
-            lat = float(row['LATITUDE']) if pd.notna(row['LATITUDE']) else None
-            lon = float(row['LONGITUDE']) if pd.notna(row['LONGITUDE']) else None
-        except ValueError:
-            lat, lon = None, None
+    # Passing chunksize makes pd.read_csv stream rows sequentially instead of flooding RAM
+    for detail_chunk in pd.read_csv(detail_file, sep="|", dtype='str', usecols=detail_cols, chunksize=chunk_size):
+        
+        # Merge this minor 50k slice with your lookups
+        dfaddress = detail_chunk.merge(meta_lookup, on="STREET_LOCALITY_PID", how='left')
+        df_final = dfaddress.merge(geocodedf, on='ADDRESS_DETAIL_PID', how='left')
 
-        # Build bulk action payload format
-        action = {
-            "_index": "gnaf",
-            "_id": row['ADDRESS_DETAIL_PID'],
-            "_source": {
-                "gnaf_pid": row['ADDRESS_DETAIL_PID'],
-                "full_address": row['full_address'],
-                "latitude": lat,
-                "longitude": lon
-            }
-        }
-        actions.append(action)
+        # Reassemble address strings for this chunk slice
+        full_addresses = (
+            df_final["BUILDING_NAME"].fillna("").astype(str) + " " +
+            df_final["LOT_NUMBER"].fillna("").astype(str) + " " +
+            df_final["LOT_NUMBER_SUFFIX"].fillna("").astype(str) + " " +
+            df_final["FLAT_TYPE_CODE"].fillna("").astype(str) + " " +
+            df_final["FLAT_NUMBER_PREFIX"].fillna("").astype(str) + " " +
+            df_final["FLAT_NUMBER"].fillna("").astype(str) + " " +
+            df_final["FLAT_NUMBER_SUFFIX"].fillna("").astype(str) + " " +
+            df_final["LEVEL_TYPE_CODE"].fillna("").astype(str) + " " +
+            df_final["LEVEL_NUMBER_PREFIX"].fillna("").astype(str) + " " +
+            df_final["LEVEL_NUMBER"].fillna("").astype(str) + " " +
+            df_final["LEVEL_NUMBER_SUFFIX"].fillna("").astype(str) + " " +
+            df_final["NUMBER_FIRST_PREFIX"].fillna("").astype(str) + " " +
+            df_final["NUMBER_FIRST"].fillna("").astype(str) + " " +
+            df_final["NUMBER_FIRST_SUFFIX"].fillna("").astype(str) + " " +
+            df_final["NUMBER_LAST_PREFIX"].fillna("").astype(str) + " " +
+            df_final["NUMBER_LAST"].fillna("").astype(str) + " " +
+            df_final["NUMBER_LAST_SUFFIX"].fillna("").astype(str) + " " +
+            df_final["STREET_NAME"].fillna("").astype(str) + " " +
+            df_final["STREET_TYPE_CODE"].fillna("").astype(str) + " " +
+            df_final["LOCALITY_NAME"].fillna("").astype(str) + " " +
+            df_final["STATE_ABBREVIATION"].fillna("").astype(str) + " " +
+            df_final["POSTCODE"].fillna("").astype(str)
+        )
+        df_final["full_address"] = full_addresses.str.replace(r'\s+', ' ', regex=True).str.strip()
 
-        # Trigger network transmission when batch capacity is reached
-        if len(actions) >= batch_size:
-            helpers.bulk(client, actions)
-            actions = [] # Clear out the uploaded batch chunk from container RAM
+        # Build actions loop for this chunk slice
+        for _, row in df_final.iterrows():
+            try:
+                lat = float(row['LATITUDE']) if pd.notna(row['LATITUDE']) else None
+                lon = float(row['LONGITUDE']) if pd.notna(row['LONGITUDE']) else None
+            except ValueError:
+                lat, lon = None, None
 
-    # Empty any remainder records left in the list
+            actions.append({
+                "_index": "gnaf",
+                "_id": row['ADDRESS_DETAIL_PID'],
+                "_source": {
+                    "gnaf_pid": row['ADDRESS_DETAIL_PID'],
+                    "full_address": row['full_address'],
+                    "latitude": lat,
+                    "longitude": lon
+                }
+            })
+
+            # Send batch payloads continuously to OpenSearch
+            if len(actions) >= 5000:
+                helpers.bulk(client, actions)
+                actions = []
+
+    # Upload any leftover records across chunks
     if actions:
         helpers.bulk(client, actions)
-        
+
+    # Clean up static lookup arrays entirely before advancing to the next state
+    del meta_lookup, geocodedf
     print(f"Finished indexing {statename} successfully!")
-    del df_final # Free up the remaining state memory block
 
 def run_pipeline():
     """Main execution orchestrator triggered by entrypoint.py inside Fargate"""
