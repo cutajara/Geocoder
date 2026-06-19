@@ -1,10 +1,9 @@
 # Geocoder
-Geocode Australia address from raw text
+Geocode Australian address from raw text
 
-Users can deploy this to there AWS Account with their Account ID and URL to latest GNAF dataset.
+Deploy this to your AWS Account with Account ID and URL to latest GNAF dataset. Service is written in IaC (aws-cdk) for automatic deployment. Can then be destroyed when not needed.
 
 ```mermaid
-
 graph TD
     %% Define Styles
     classDef github fill:#24292e,stroke:#fff,stroke-width:1px,color:#fff;
@@ -15,7 +14,7 @@ graph TD
     %% External & CI/CD
     subgraph GitHub_Platform ["GitHub"]
         GA[GitHub Actions Workflow]:::github
-        ECR[(Amazon ECR<br>Private Registry)]:::github
+        
     end
 
     User([Local PC / Developer CLI]):::external
@@ -23,17 +22,17 @@ graph TD
 
     %% AWS Cloud Infrastructure
     subgraph AWS_Cloud ["AWS Cloud (selected region)"]
-        
+        ECR[(Amazon ECR<br>Private Registry)]
         %% Public Layer
         subgraph Public_Subnet ["VPC Public Subnet (Max AZs: 1)"]
-            APIGW[Amazon API Gateway<br>⚡ Throttling: 10 rps / 20 burst]:::awsPublic
+            APIGW[Amazon API Gateway<br>Throttling: 10 rps / 20 burst]:::awsPublic
             NAT[NAT Gateway]:::awsPublic
         end
 
         %% Private Layer
         subgraph Private_Subnet ["VPC Private Subnet (With Egress)"]
-            Fargate[ECS Fargate Ingestion Task<br>📦 Chunked Pandas Stream Engine]:::awsPrivate
-            Lambda[AWS Lambda Function<br>🔍 API Query Handler]:::awsPrivate
+            Fargate[ECS Fargate Ingestion Task<br>Chunked Pandas Stream Engine]:::awsPrivate
+            Lambda[AWS Lambda Function<br>API Query Handler]:::awsPrivate
             OpenSearch[(Amazon OpenSearch Service<br>t3.small.search / 0 Replicas)]:::awsPrivate
         end
 
@@ -60,52 +59,29 @@ graph TD
 ```
     
 ## Pipeline
-- To download the large GNAF dataset, run a Fargate container. Stream to download to manage RAM
-- Process one state at a time and upload to OpenSearch
-- OpenSearch handels the address matching and similarity
+1. Downloads GNAF dataset from provided URL. This runs in a Fargate container, streaming the download to manage RAM
+2. Process one state at a time and upload to OpenSearch
+3. OpenSearch handels the address matching and similarity
+4. API Gateway is created which routes to a lambda function to query OpenSearch
 
-When deployed, users will recieve a API Gateway URL.
+When deployed, users will recieve an API Gateway URL.
 When requests are received they are sent to a lambda function which queries OpenSearch and returns the matches.
 
-The endpoint to send requests is:
-curl -X POST 
+ ### Once deployed:
+ To curl the API:
+ ```curl -X GET "https://xxxxxxxxxx.execute-api.ap-southeast-2.amazonaws.com/prod/geocode_address?address=100+GeorgeSt+Sydney"```
 
 ## Deploying the App
-Your PC will need:
-- Python
-- awscli-2
-- Either Docker OR nodejs (nodejs is needed for aws cdk. If not avalible, you can use the Docker.dev container)
+Deploy with GitHub Actions, there is a deploy.yml, that creates the infrastucture in your AWS account. This runs the pipelines and creates the infrastructure, returning a URL link to send requests to.
+Once you are done, run destroy.yml to teardown the infrustruction and not incur costs.
 
-### To install awscli-2 (In PowerShell)
-Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile "$env:USERPROFILE\Downloads\AWSCLIV2.msi"
-msiexec /a "$env:USERPROFILE\Downloads\AWSCLIV2.msi" /qb TARGETDIR="$env:USERPROFILE\awscli"
-Set-Alias -Name aws -Value "$env:USERPROFILE\awscli\Amazon\AWSCLIV2\aws.exe"
-aws configure
+Three environment variables are required (assign in Secrets and varaibles):
+1. AWS Account Number
+2. AWS User Access Key
+3. AWS User Access Secret
 
-# Create the repo
-aws ecr create-repository --repository-name gnaf-processor --region ap-southeast-2
+When deploying, there is a region parameter to deploy to your prefered region.
 
-# Log your local Docker into your private AWS Registry
-aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin <YOUR_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com
+The API returns the 5 closest addresses to the users input, with the lat and long of the address.
 
-# Build, tag, and push!
-docker build -t gnaf-processor:latest .
-docker tag gnaf-processor:latest <YOUR_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/gnaf-processor:latest
-docker push <YOUR_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/gnaf-processor:latest
-
-## Build build dev container
-docker build -t geocoder-dev -f Dockerfile.dev .
-
-## To run the dev container (if awscdk not installed on your PC)
-docker run -it -v ${PWD}:/app -e AWS_ACCESS_KEY_ID=your-key -e AWS_SECRET_ACCESS_KEY=your-secret-e AWS_DEFAULT_REGION=ap-southeast-2 -e AWS_ACCOUNT_ID=you-account-id geocoder-dev /bin/bash
-  
-  
- When inside
- - cdk bootstrap --app echo []
- - cdk deploy --parameters GnafUrl="https://data.gov.au/data/dataset/19432f89-dc3a-4ef3-b943-5326ef1dbecc/resource/f8666213-4079-44da-bede-ebda3a4363e0/download/g-naf_may26_allstates_gda2020_psv_1023.zip" --parameters GnafMonthRelease="MAY 2026" --parameters AwsAccountId="<YOUR_ACCOUNT_ID>"
- 
-
-
- # Once deployed:
- To curl the API:
- curl -X GET "https://xxxxxxxxxx.execute-api.ap-southeast-2.amazonaws.com/prod/geocode_address?address=100+GeorgeSt+Sydney"
+Enjoy :)
