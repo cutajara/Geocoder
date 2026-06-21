@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. Checkout your code repo
+    # 1. Checkout code repo
     - name: Checkout Code
       uses: actions/checkout@v4
 
@@ -46,12 +46,12 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ inputs.deployment_region }}
 
-    # 5. Log in to your private Amazon ECR Registry
+    # 5. Log in to private Amazon ECR Registry
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # 6. Build and Push the heavy Fargate container to ECR
+    # 6. Build and Push Fargate container to ECR
     - name: Build, Tag, and Push Docker Image to ECR
       run: |
         # Create repo if it doesn't exist yet
@@ -68,7 +68,7 @@ jobs:
         npm install -g aws-cdk
         pip install -r requirements.txt
         
-        # Deploy using cloud-native parameters without touching local computer paths
+        # Deploy using cloud-native parameters
         cdk deploy --require-approval never \
           --parameters GnafUrl="${{ inputs.gnaf_url }}" \
           --parameters GnafMonthRelease="${{ inputs.release_month }}" \
@@ -77,14 +77,14 @@ jobs:
     # 8. Fire off the ingestion task automatically using the explicit Stack Outputs
     - name: Trigger G-NAF Ingestion Task
       run: |
-        # 1. Fetch the exact CloudFormation Output parameters from your deployed stack
+        # 1. Fetch the exact CloudFormation Output parameters from deployed stack
         CF_OUTPUTS=$(aws cloudformation describe-stacks --stack-name GeocoderStack --query 'Stacks[0].Outputs')
 
         CLUSTER_NAME=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafClusterName") | .OutputValue')
         VPC_ID=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafVpcId") | .OutputValue')
         TASK_ARN=$(echo "$CF_OUTPUTS" | jq -r '.[] | select(.OutputKey=="GnafTaskArn") | .OutputValue')
 
-        # 2. Dynamically retrieve the private subnet ID from your new VPC
+        # 2. Dynamically retrieve the private subnet ID from VPC
         SUBNET_ID=$(aws ec2 describe-subnets \
           --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=*PrivateWithEgress*" \
           --query "Subnets[0].SubnetId" --output text)

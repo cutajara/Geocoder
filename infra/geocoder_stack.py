@@ -5,7 +5,6 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_opensearchservice as opensearch,
     aws_iam as iam,
-    aws_ecr_assets as ecr_assets  # 1. Added for Docker-less cloud asset bundling
 )
 from constructs import Construct
 from aws_cdk import aws_ecs as ecs
@@ -20,27 +19,27 @@ class GeocoderStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # 1. Configurable Runtime Parameters (No hardcoded data URLs)
+        # 1. Configure Runtime Parameters
         gnaf_url = CfnParameter(self, "GnafUrl", type="String", 
-                                description="The direct secure download URL for the GNAF zip archive")
+                                description="Download URL for the GNAF zip")
         gnaf_month = CfnParameter(self, "GnafMonthRelease", type="String",
-                                  description="The release tag month (e.g., May2026)")
+                                  description="The release tag month (e.g., MAY 2026)")
         awsAccount = CfnParameter(self, "AwsAccountId", type="String",
-                                  description="Your AWS Account ID (for ECR image reference)")
+                                  description="AWS Account ID to deploy on")
         
         ecr_region = self.region  # Dynamically reference the deployment region for ECR image sourcing
 
-        # 2. Build an Isolated Network Environment
+        # 2. Build an Isolated Network Environment (VPC with Public and Private Subnets)
         vpc = ec2.Vpc(
             self, "GnafVpc",
-            max_azs=1,  # Kept to 1 for cost efficiency on our t3.small sandbox cluster
-            subnet_configuration=[
-                ec2.SubnetConfiguration(
+            max_azs=1,  # Kept to 1 for cost efficiency on t3.small sandbox cluster
+            subnet_configuration=[ # Create 2 subsets
+                ec2.SubnetConfiguration( # Subnet for public facing subset for infra with public inbound access
                     name="Public", 
                     subnet_type=ec2.SubnetType.PUBLIC, 
                     cidr_mask=24
                 ),
-                ec2.SubnetConfiguration(
+                ec2.SubnetConfiguration( # Subset for private resources like OpenSearch and Lambda with no direct inbound access, but public outbound access via NAT Gateway
                     name="PrivateWithEgress", 
                     subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, 
                     cidr_mask=24
@@ -78,7 +77,6 @@ class GeocoderStack(Stack):
             vpc=vpc,
             security_groups=[opensearch_sg],
             vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)],
-#            vpc_subnets=vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS).subnets,
             
             # Open VPC Access Policy: Controlled entirely via Security Groups for safety
             access_policies=[
@@ -91,23 +89,22 @@ class GeocoderStack(Stack):
             ],
             removal_policy=RemovalPolicy.DESTROY  # Erases the domain entirely on 'cdk destroy'
         )
-        # 5. Create an ECS Cluster to host our one-off container execution
+        # 5. Create an ECS Cluster to host one-off container execution
         cluster = ecs.Cluster(self, "GnafEcsCluster", vpc=vpc)
 
         # 6. Define the Serverless Fargate Task
         fargate_task = ecs.FargateTaskDefinition(
             self, "GnafIngestionTask",
             memory_limit_mib=4096,
-            cpu=2048
+            cpu=2048,
+            ephemeral_storage_gib=100
         )
         # Grants the ECS Agent permission to read from private ECR registry
         fargate_task.obtain_execution_role().add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")
         )
 
-        # 7. Link Your Pre-built Code Registry
-        # By pointing directly to your remote ECR URL, your dev container
-        # never has to execute local docker commands during deployment.
+        # 7. Link Pre-built Code Registry
         container = fargate_task.add_container(
             "GnafProcessorContainer",
             image=ecs.ContainerImage.from_registry(f"{awsAccount.value_as_string}.dkr.ecr.{ecr_region}.amazonaws.com/gnaf-processor:latest"), # COME BACK AND ADJUST FOR DIFFERNT REGION@
@@ -117,6 +114,7 @@ class GeocoderStack(Stack):
             ),
             environment={
                 "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
+                "AWS_REGION": self.region,
                 "GNAF_URL": gnaf_url.value_as_string,
                 "GNAF_RELEASE": gnaf_month.value_as_string,
                 "RUN_MODE": "process"
@@ -129,7 +127,7 @@ class GeocoderStack(Stack):
         # 9. Create the Serverless Lambda function with Auto-Dependency Bundling
         geocoder_lambda = lambda_python.PythonFunction(
             self, "GnafQueryLambda",
-            entry="./api",                      # Points to your directory containing lambda_handler.py
+            entry="./api",                      # Points to directory containing lambda_handler.py
             index="lambda_handler.py",          # The file name
             handler="handler",                  # The function inside that file
             runtime=_lambda.Runtime.PYTHON_3_11,
@@ -138,6 +136,7 @@ class GeocoderStack(Stack):
             security_groups=[opensearch_sg],
             environment={
                 "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
+                "AWS_REGION": self.region,
                 "RUN_MODE": "serve"
             }
         )
@@ -145,11 +144,11 @@ class GeocoderStack(Stack):
         # 10. Grant the Lambda permission to query (Read) OpenSearch
         opensearch_domain.grant_read(geocoder_lambda.role)
 
-        # 11. Wrap it with an API Gateway so you can hit it over the web
+        # 11. Wrap it with an API Gateway
         api = apigw.LambdaRestApi(
             self, "GnafGeocoderApi",
             handler=geocoder_lambda,
-            proxy=True, # Forwards all paths directly to our Lambda handler
+            proxy=True, # Forwards all paths directly to Lambda handler
             description="Public endpoint for our Australian address geocoder",
             deploy_options=apigw.StageOptions(
                 stage_name="prod",

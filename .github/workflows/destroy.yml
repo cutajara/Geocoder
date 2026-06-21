@@ -1,11 +1,11 @@
 name: Destroy Geocoder Stack
 
-# 1. This ensures it can ONLY be triggered manually by YOU via the GitHub Actions tab
+# 1. This ensures it can ONLY be triggered manually by repo owner via the GitHub Actions tab
 on:
   workflow_dispatch:
     inputs:
       deployment_region:
-        description: 'AWS region the stack  is deployed in (e.g. ap-southeast-2)'
+        description: 'AWS region the stack is deployed in (e.g. ap-southeast-2)'
         required: false
         default: 'ap-southeast-2'
         type: string
@@ -28,7 +28,7 @@ jobs:
       with:
         node-version: '24'
 
-    # 2. Authenticate to your account using your repository secrets
+    # 2. Authenticate account using repository secrets
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
