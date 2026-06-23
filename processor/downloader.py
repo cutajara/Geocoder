@@ -3,6 +3,7 @@ import sys
 import zipfile
 import shutil
 import traceback
+import gc
 from datetime import datetime
 import requests
 import boto3
@@ -136,6 +137,17 @@ def cleanup_state_files(data_path, statename):
             os.remove(fp)
 
 
+def log_memory_hint():
+    """Best-effort memory visibility without adding native dependencies."""
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as proc_status:
+            for line in proc_status:
+                if line.startswith(("VmRSS:", "VmHWM:", "VmSize:")):
+                    log(f"Memory {line.strip()}")
+    except OSError:
+        pass
+
+
 def bulk_index_actions(client, actions, statename, chunk_number):
     """Bulk index with retries and non-fatal reporting of per-document failures."""
     success_count = 0
@@ -170,6 +182,7 @@ def bulk_index_actions(client, actions, statename, chunk_number):
 def process_and_bulk_index_state(client, data_path, statename):
     """Transforms state rows in streaming chunks to keep memory usage flat"""
     log(f"Processing and indexing {statename}...")
+    log_memory_hint()
     
     detail_file = f"{data_path}/{statename}_ADDRESS_DETAIL_psv.psv"
     if not os.path.exists(detail_file):
@@ -265,11 +278,15 @@ def process_and_bulk_index_state(client, data_path, statename):
                 f"{statename} progress: chunks={chunk_number}, rows_seen={total_rows}, "
                 f"indexed={total_success}, failed={total_failures}"
             )
+            log_memory_hint()
 
         del detail_chunk, dfaddress, df_final, full_addresses
+        gc.collect()
 
     # Clean up static lookup arrays entirely before advancing to the next state
     del meta_lookup, geocodedf
+    gc.collect()
+    log_memory_hint()
 
     log(
         f"Finished indexing {statename}. rows_seen={total_rows}, "
@@ -344,7 +361,9 @@ def run_pipeline():
                     raise
             finally:
                 cleanup_state_files(os.path.join(extract_root, "G-NAF", f"G-NAF {GNAF_RELEASE}", "Standard"), state)
+                gc.collect()
                 log_disk_usage("./tmp")
+                log_memory_hint()
 
         log("Success! All configured GNAF states have been processed.")
     except Exception:

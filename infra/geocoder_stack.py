@@ -26,6 +26,41 @@ class GeocoderStack(Stack):
                                   description="The release tag month (e.g., MAY 2026)")
         awsAccount = CfnParameter(self, "AwsAccountId", type="String",
                                   description="AWS Account ID to deploy on")
+        gnaf_states = CfnParameter(
+            self,
+            "GnafStates",
+            type="String",
+            default="NSW,VIC,QLD,SA,WA,TAS,NT,ACT,OT",
+            description="Comma-separated list of state codes to process"
+        )
+        open_search_volume_gib = CfnParameter(
+            self,
+            "OpenSearchVolumeGiB",
+            type="Number",
+            default=100,
+            description="OpenSearch EBS volume size in GiB"
+        )
+        fargate_memory_mib = CfnParameter(
+            self,
+            "FargateMemoryMiB",
+            type="Number",
+            default=8192,
+            description="Fargate task memory in MiB"
+        )
+        fargate_cpu = CfnParameter(
+            self,
+            "FargateCpu",
+            type="Number",
+            default=2048,
+            description="Fargate task CPU units"
+        )
+        fargate_ephemeral_storage_gib = CfnParameter(
+            self,
+            "FargateEphemeralStorageGiB",
+            type="Number",
+            default=100,
+            description="Fargate task ephemeral storage in GiB"
+        )
         
         ecr_region = self.region  # Dynamically reference the deployment region for ECR image sourcing
 
@@ -71,7 +106,7 @@ class GeocoderStack(Stack):
                 data_nodes=1
             ),
             ebs=opensearch.EbsOptions(
-                volume_size=15,  # 15 GB allocation tailored for micro pricing
+                volume_size=open_search_volume_gib.value_as_number,
                 volume_type=ec2.EbsDeviceVolumeType.GP3
             ),
             vpc=vpc,
@@ -95,9 +130,9 @@ class GeocoderStack(Stack):
         # 6. Define the Serverless Fargate Task
         fargate_task = ecs.FargateTaskDefinition(
             self, "GnafIngestionTask",
-            memory_limit_mib=4096,
-            cpu=2048,
-            ephemeral_storage_gib=100
+            memory_limit_mib=fargate_memory_mib.value_as_number,
+            cpu=fargate_cpu.value_as_number,
+            ephemeral_storage_gib=fargate_ephemeral_storage_gib.value_as_number
         )
         # Grants the ECS Agent permission to read from private ECR registry
         fargate_task.obtain_execution_role().add_managed_policy(
@@ -117,6 +152,7 @@ class GeocoderStack(Stack):
                 "AWS_REGION": self.region,
                 "GNAF_URL": gnaf_url.value_as_string,
                 "GNAF_RELEASE": gnaf_month.value_as_string,
+                "GNAF_STATES": gnaf_states.value_as_string,
                 "RUN_MODE": "process"
             }
         )
