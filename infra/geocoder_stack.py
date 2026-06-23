@@ -136,7 +136,6 @@ class GeocoderStack(Stack):
             security_groups=[opensearch_sg],
             environment={
                 "OPENSEARCH_ENDPOINT": opensearch_domain.domain_endpoint,
-                "AWS_REGION": self.region,
                 "RUN_MODE": "serve"
             }
         )
