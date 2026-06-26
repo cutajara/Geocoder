@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import os
-
 import aws_cdk as cdk
 from geocoder_stack import GeocoderStack
 
