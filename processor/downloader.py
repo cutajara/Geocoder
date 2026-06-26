@@ -19,8 +19,8 @@ AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
 GNAF_URL = os.environ.get("GNAF_URL")
 GNAF_RELEASE = os.environ.get("GNAF_RELEASE") # e.g., "MAY 2026"
 
-CHUNK_SIZE = int(os.environ.get("GNAF_CHUNK_SIZE", "5000"))
-BULK_CHUNK_SIZE = int(os.environ.get("GNAF_BULK_CHUNK_SIZE", "1000"))
+CHUNK_SIZE = int(os.environ.get("GNAF_CHUNK_SIZE", "10000"))
+BULK_CHUNK_SIZE = int(os.environ.get("GNAF_BULK_CHUNK_SIZE", "2500"))
 REQUEST_TIMEOUT_SEC = int(os.environ.get("GNAF_REQUEST_TIMEOUT_SEC", "120"))
 BULK_REQUEST_TIMEOUT_SEC = int(os.environ.get("GNAF_BULK_REQUEST_TIMEOUT_SEC", "90"))
 CONTINUE_ON_STATE_ERROR = os.environ.get("CONTINUE_ON_STATE_ERROR", "false").lower() == "true"
